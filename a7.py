@@ -9,11 +9,16 @@ from snowflake.core import Root
 from typing import Any, Dict, List, Optional, Tuple
 import plotly.express as px
 import time
+import os
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
 
 # Snowflake/Cortex Configuration
-HOST = "gbjyvct-lsb50763.snowflakecomputing.com"
-DATABASE = "AI"
-SCHEMA = "DWH_MART"
+HOST = os.getenv("SNOWFLAKE_HOST", "gbjyvct-lsb50763.snowflakecomputing.com")
+DATABASE = os.getenv("SNOWFLAKE_DATABASE", "AI")
+SCHEMA = os.getenv("SNOWFLAKE_SCHEMA", "DWH_MART")
 API_ENDPOINT = "/api/v2/cortex/agent:run"
 API_TIMEOUT = 50000  # in milliseconds
 CORTEX_SEARCH_SERVICES = "PROC_SERVICE"
@@ -37,8 +42,6 @@ st.set_page_config(
 # Initialize session state
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
-    st.session_state.username = ""
-    st.session_state.password = ""
     st.session_state.CONN = None
     st.session_state.snowpark_session = None
     st.session_state.chat_history = []
@@ -233,39 +236,40 @@ def create_prompt(user_question):
     """
     return complete(st.session_state.model_name, prompt)
 
+# Authentication using environment variables
 if not st.session_state.authenticated:
     st.title("Welcome to Snowflake Cortex AI")
-    st.write("Please login to interact with your data")
-    st.session_state.username = st.text_input("Enter Snowflake Username:", value=st.session_state.username)
-    st.session_state.password = st.text_input("Enter Password:", type="password")
-    if st.button("Login"):
-        try:
-            conn = snowflake.connector.connect(
-                user=st.session_state.username,
-                password=st.session_state.password,
-                account="gbjyvct-lsb50763",
-                host=HOST,
-                port=443,
-                warehouse="COMPUTE_WH",
-                role="ACCOUNTADMIN",
-                database=DATABASE,
-                schema=SCHEMA,
-            )
-            st.session_state.CONN = conn
-            snowpark_session = Session.builder.configs({
-                "connection": conn
-            }).create()
-            st.session_state.snowpark_session = snowpark_session
-            with conn.cursor() as cur:
-                cur.execute(f"USE DATABASE {DATABASE}")
-                cur.execute(f"USE SCHEMA {SCHEMA}")
-                cur.execute("ALTER SESSION SET TIMEZONE = 'UTC'")
-                cur.execute("ALTER SESSION SET QUOTED_IDENTIFIERS_IGNORE_CASE = TRUE")
-            st.session_state.authenticated = True
-            st.success("Authentication successful! Redirecting...")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Authentication failed: {e}")
+    st.write("Connecting to Snowflake...")
+    try:
+        logging.debug(f"Connecting to Snowflake with user={os.getenv('SNOWFLAKE_USERNAME')}, account={os.getenv('SNOWFLAKE_ACCOUNT')}, host={os.getenv('SNOWFLAKE_HOST')}")
+        conn = snowflake.connector.connect(
+            user=os.getenv("SNOWFLAKE_USERNAME"),
+            password=os.getenv("SNOWFLAKE_PASSWORD"),
+            account=os.getenv("SNOWFLAKE_ACCOUNT"),
+            host=os.getenv("SNOWFLAKE_HOST"),
+            port=443,
+            warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
+            role=os.getenv("SNOWFLAKE_ROLE"),
+            database=os.getenv("SNOWFLAKE_DATABASE"),
+            schema=os.getenv("SNOWFLAKE_SCHEMA"),
+            client_session_keep_alive=True
+        )
+        st.session_state.CONN = conn
+        snowpark_session = Session.builder.configs({
+            "connection": conn
+        }).create()
+        st.session_state.snowpark_session = snowpark_session
+        with conn.cursor() as cur:
+            cur.execute(f"USE DATABASE {os.getenv('SNOWFLAKE_DATABASE')}")
+            cur.execute(f"USE SCHEMA {os.getenv('SNOWFLAKE_SCHEMA')}")
+            cur.execute("ALTER SESSION SET TIMEZONE = 'UTC'")
+            cur.execute("ALTER SESSION SET QUOTED_IDENTIFIERS_IGNORE_CASE = TRUE")
+        st.session_state.authenticated = True
+        st.success("Authentication successful! Redirecting...")
+        st.rerun()
+    except Exception as e:
+        logging.error(f"Authentication failed: {str(e)}")
+        st.error(f"Authentication failed: {str(e)}")
 else:
     session = st.session_state.snowpark_session
     root = Root(session)
@@ -396,7 +400,7 @@ else:
             payload["tool_resources"] = {"search1": {"name": "PROC_SERVICE", "max_results": st.session_state.num_retrieved_chunks}}
         try:
             resp = requests.post(
-                url=f"https://{HOST}{API_ENDPOINT}",
+                url=f"https://{os.getenv('SNOWFLAKE_HOST')}{API_ENDPOINT}",
                 json=payload,
                 headers={
                     "Authorization": f'Snowflake Token="{st.session_state.CONN.rest.token}"',
